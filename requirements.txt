@@ -1,0 +1,14 @@
+# ASAN Macro - Maritime & Trade Analysis Agent
+# Python 3.9+
+
+# LLM
+openai>=1.0.0
+
+# Database & data
+# (sqlite3 is in stdlib)
+
+# Env and CLI
+python-dotenv>=1.0.0
+
+# Optional: Google Gemini (free tier - use when OpenAI quota exceeded)
+google-generativeai>=0.8.0
