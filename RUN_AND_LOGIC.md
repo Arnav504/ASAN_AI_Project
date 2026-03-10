@@ -6,7 +6,7 @@
 
 1. **Python 3.9+** with the project dependencies:
    ```bash
-   cd "/Users/arnavsahai/Desktop/AI Propject"
+   cd "/Users/arnavsahai/Desktop/AI Project"
    pip install -r requirements.txt
    ```
    Or use the project venv: `./run.sh` (uses `.venv` if present).
@@ -17,8 +17,8 @@
      ollama pull qwen2:7b
      ```
      In `.env`: `USE_LOCAL_LLM=1` and `OLLAMA_MODEL=qwen2:7b`.
-   - **OpenAI:** In `.env`: `OPENAI_API_KEY=sk-...`
-   - **Gemini:** In `.env`: `GEMINI_API_KEY=...`
+   - **OpenAI:** In `.env`: `OPENAI_API_KEY=sk-...` (optional `OPENAI_MODEL=gpt-4o` for better quality).
+   - **Gemini:** In `.env`: `GEMINI_API_KEY=...` (optional `GEMINI_MODEL=gemini-1.5-pro`).
 
 ### Commands
 
@@ -29,12 +29,31 @@ python main.py
 
 **With options:**
 ```bash
-python main.py -q "BRICS"              # Focus on BRICS
-python main.py -q "US-China electronics"
-python main.py -o report.txt            # Output to report.txt
-python main.py -d sample_trade.csv     # Load extra data from CSV first
+python main.py -q "BRICS"                    # Focus on BRICS
+python main.py -q "US-China electronics"    # Focus query
+python main.py -o report.txt                 # Output to report.txt
+python main.py -d sample_trade.csv           # Load CSV into DB first
+python main.py --data-url "https://..."      # Load CSV from URL (dynamic data)
+python main.py -f html -o report.html        # HTML report
+python main.py -f linkedin -o report.txt      # Report + LINKEDIN_SUMMARY.txt one-liner
+python main.py -f json -o report.json        # Structured JSON (summary, bullets, so_what, whats_next)
 python main.py -q "BRICS" -o report.txt -d sample_trade.csv
 ```
+
+**Optional: ingest live UN Comtrade data first**, then run the report:
+```bash
+python scripts/fetch_comtrade.py            # Fetches into data/trade.db
+python main.py -q "BRICS" -o report.txt
+```
+See **DOC_COMTRADE.md** for API key and options.
+
+**Scheduled run (ingest + report in one go):**
+```bash
+chmod +x scripts/run_scheduled.sh
+./scripts/run_scheduled.sh
+./scripts/run_scheduled.sh -q "BRICS" -o report.txt
+```
+See **SCHEDULING.md** for cron and GitHub Actions.
 
 **Using the run script:**
 ```bash
@@ -44,8 +63,16 @@ python main.py -q "BRICS" -o report.txt -d sample_trade.csv
 
 ### What you get
 
-- **Input:** The seeded trade database (`data/trade.db`), optionally plus rows from a CSV (`--data`), and an optional focus (`--query`).
-- **Output:** A text report written to a file (e.g. `report.txt` or `report_YYYYMMDD_HHMMSS.txt`) and printed to the terminal. No extra manual steps.
+- **Input:** The seeded trade database (`data/trade.db`), optionally plus:
+  - Rows from a local CSV (`--data`),
+  - Rows from a CSV URL (`--data-url`),
+  - Or rows from `scripts/fetch_comtrade.py` (UN Comtrade API),
+  and an optional focus (`--query`).
+- **Output:** Depends on `--format`:
+  - **text** (default): Report written to the given file (or timestamped `report_YYYYMMDD_HHMMSS.txt`) and printed.
+  - **html**: Single HTML file (shareable).
+  - **linkedin**: Report file + `LINKEDIN_SUMMARY.txt` (one-liner).
+  - **json**: Structured JSON file with `summary`, `key_regions_sectors`, `so_what`, `whats_next`, `bullets`, `generated_at`, `full_report` (for dashboards/APIs).
 
 ---
 
@@ -62,7 +89,7 @@ User runs:  python main.py -q "BRICS" -o report.txt
 ```
 
 1. **Load `.env`**  
-   Environment variables (API keys, `USE_LOCAL_LLM`, `OLLAMA_MODEL`, etc.) are loaded from `.env` so the rest of the app can decide which LLM to use.
+   Environment variables (API keys, `USE_LOCAL_LLM`, `OLLAMA_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`, optional `COMTRADE_API_KEY`, etc.) are loaded from `.env`.
 
 2. **Ensure database exists**  
    `ensure_db()` (from `database.py`) runs:
@@ -70,17 +97,22 @@ User runs:  python main.py -q "BRICS" -o report.txt
    - Applies schema: tables `trade_flows` (region, partner, sector, year, value_usd) and `rag_chunks` (stored bulletins for RAG).
    - Seeds sample trade data and RAG chunks if the tables are empty.
 
-3. **Optional: load CSV**  
-   If you passed `--data sample_trade.csv`, the script reads that CSV and **inserts** rows into `trade_flows` (same columns: year, reporter_region, partner_region, sector, flow_type, value_usd). This is your “raw data” input.
+3. **Optional: dynamic data ingestion**  
+   - If `--data path.csv` is passed and the file exists: load that CSV into `trade_flows` (via `data_ingestion.load_csv_path` or fallback `_load_csv_into_db`). Columns: year, reporter_region, partner_region, sector, flow_type, value_usd.
+   - If `--data-url URL` is passed: fetch CSV from URL and load into `trade_flows` (via `data_ingestion.load_csv_url`; requires `requests`).
+   - Alternatively you can run `python scripts/fetch_comtrade.py` **before** `main.py` to ingest live UN Comtrade data into the same DB (see DOC_COMTRADE.md).
 
 4. **Run the agent**  
    `report = run_agent(user_query=args.query)`  
-   This is where all LLM and tool logic lives. It returns one string: the report text.
+   All LLM and tool logic lives here. Returns one string: the report text.
 
-5. **Write and print**  
-   The report string is written to the path from `--output` (or a timestamped filename) and printed to the terminal. Then the script exits.
+5. **Write output (format depends on `--format`)**  
+   - **text**: Write report to `--output` path (or timestamped file) and print to terminal.
+   - **html**: Write `_report_to_html(report)` to `--output` with `.html` suffix.
+   - **linkedin**: Write report to file and also write `LINKEDIN_SUMMARY.txt` (one-liner) in the same directory; print both.
+   - **json**: Parse report with `_report_to_json(report)` and write JSON (summary, key_regions_sectors, so_what, whats_next, bullets, generated_at, full_report) to `--output` with `.json` suffix.
 
-So the “logic” of the run is: **config + DB + optional CSV** → **agent** → **report file + console**.
+So the “logic” of the run is: **config + DB + optional ingestion (CSV/URL/Comtrade)** → **agent** → **report string** → **file(s) by format + console**.
 
 ---
 
@@ -115,6 +147,9 @@ Used when you run with local model (e.g. `USE_LOCAL_LLM=1`, `OLLAMA_MODEL=qwen2:
    - `rag_retrieve("BRICS decoupling trade")` → matching RAG chunks  
    - `rag_retrieve("US China electronics")`  
    - `query_trade_flows(year_from=2022, limit=30)` → table of flows  
+   - `get_yoy_growth(year_from=2022, year_to=2024)` → YoY growth  
+   - `get_top_flows(n=10, year_from=2022)` → top flows by value  
+   - `get_trade_trends(limit=10)` → trends (up/down)  
    - If `user_query` is set (e.g. `"BRICS"`), also `rag_retrieve(user_query)`  
 
    All of this is concatenated into a single **context** string.
@@ -161,7 +196,7 @@ Same idea as Ollama: **no tool-calling by the model**. The app gathers context f
    Same structure: “use this data…” + context + “output REPORT_START … REPORT_END”.
 
 3. **One Gemini call**  
-   Uses `google.generativeai`, model `gemini-2.0-flash`, with that prompt. On 429, it retries once after a wait; if it still fails, it can return a sample report (quota-exceeded path).
+   Uses `google.generativeai`, model from `GEMINI_MODEL` (default `gemini-2.0-flash`), with that prompt. On 429, it retries once after a wait; if it still fails, it can return a sample report (quota-exceeded path).
 
 4. **Parse report**  
    Same as Ollama: extract text between `REPORT_START` and `REPORT_END` and return it.
@@ -176,7 +211,7 @@ DB + RAG + tools (called in code) → one prompt → Gemini API → parse report
 Used when you have `OPENAI_API_KEY` and did **not** enable Ollama or Gemini.
 
 1. **Define tools**  
-   The agent registers tools with the API: `list_regions`, `list_sectors`, `query_trade_flows`, `get_region_summary`, `get_sector_summary`, `rag_retrieve` (with names and parameters).
+   The agent registers tools with the API: `list_regions`, `list_sectors`, `query_trade_flows`, `get_region_summary`, `get_sector_summary`, `rag_retrieve`, `get_yoy_growth`, `get_top_flows`, `get_trade_trends` (with names and parameters).
 
 2. **First LLM call**  
    Sends system prompt + user message (e.g. “Analyze the trade database and produce the sentiment report” or “Focus on: BRICS…”). Asks the model to use the tools and then output `REPORT_START` … `REPORT_END`.
@@ -209,7 +244,12 @@ No matter which LLM is used, the **data** the report is based on comes from:
   - **list_regions** / **list_sectors**: query distinct values from `trade_flows`.  
   - **query_trade_flows**: filter by reporter, partner, sector, year range, limit.  
   - **get_region_summary** / **get_sector_summary**: aggregated trade by region or sector.  
-  - **rag_retrieve**: simple keyword search over `rag_chunks` to pull relevant bulletins.
+  - **rag_retrieve**: simple keyword search over `rag_chunks` to pull relevant bulletins.  
+  - **get_yoy_growth**: year-over-year growth in trade value (optional region, sector, year range).  
+  - **get_top_flows**: top N flows by value (optional year range, flow_type).  
+  - **get_trade_trends**: which sectors/partners grew or shrank (optional region, limit).
+
+Data can also be **ingested** before the run via `--data`, `--data-url`, or `scripts/fetch_comtrade.py` (see `data_ingestion.py` and DOC_COMTRADE.md).
 
 For **Ollama and Gemini**, the agent code calls these tools **once** before the LLM call and injects their output into the prompt. For **OpenAI**, the model **requests** tool calls over multiple turns, and the code runs the tools and returns results in the conversation.
 
@@ -221,12 +261,14 @@ For **Ollama and Gemini**, the agent code calls these tools **once** before the 
 User
   │
   ├─ python main.py -q "BRICS" -o report.txt
+  ├─ (optional) python scripts/fetch_comtrade.py   →  load live Comtrade into DB
+  ├─ (optional) ./scripts/run_scheduled.sh -o report.txt   →  ingest + report
   │
   ▼
 main.py
   │  1. Load .env
   │  2. ensure_db()  →  data/trade.db (schema + seed)
-  │  3. Optional: load --data CSV into trade_flows
+  │  3. Optional: --data CSV or --data-url URL  →  load into trade_flows (data_ingestion)
   │  4. run_agent(user_query="BRICS")
   ▼
 agent.run_agent
@@ -234,7 +276,8 @@ agent.run_agent
   ├─ USE_LOCAL_LLM / OLLAMA_MODEL?  ──Yes──► _run_agent_ollama
   │                                              │
   │                                              ├─ Call tools (list_regions, list_sectors,
-  │                                              │   rag_retrieve, query_trade_flows)
+  │                                              │   rag_retrieve, query_trade_flows,
+  │                                              │   get_yoy_growth, get_top_flows, get_trade_trends)
   │                                              ├─ Build one prompt with context
   │                                              ├─ Ollama (localhost:11434) → one response
   │                                              └─ Parse REPORT_START/REPORT_END → return text
@@ -247,10 +290,10 @@ agent.run_agent
   │
   ▼
 main.py
-  │  5. Write report text to file (-o or timestamped)
-  │  6. Print report to terminal
+  │  5. By --format: write report to file (text / html / linkedin one-liner / json)
+  │  6. Print report to console
   ▼
-Done. Report on disk and in console.
+Done. Report on disk (+ optional LINKEDIN_SUMMARY.txt or .json) and in console.
 ```
 
 ---
@@ -259,13 +302,14 @@ Done. Report on disk and in console.
 
 | Step | What happens |
 |------|-------------------------------|
-| **Run** | `python main.py` (optionally with `-q`, `-o`, `-d`) |
-| **Config** | `.env` loaded; DB path, API keys, Ollama/Gemini flags read |
-| **DB** | `data/trade.db` created/seeded; optional CSV loaded into `trade_flows` |
-| **LLM choice** | Ollama (if local) → else Gemini (if key) → else OpenAI (if key) |
-| **Context** | Tools read from DB: regions, sectors, RAG chunks, trade flows (and optional user focus) |
-| **Ollama/Gemini** | Context pasted into one prompt → one LLM call → parse REPORT_START/END |
-| **OpenAI** | Multi-turn chat; model calls tools; when model outputs REPORT_START/END, parse and return |
-| **Output** | Report string written to file and printed |
+| **Run** | `python main.py` (optionally `-q`, `-o`, `-d`, `--data-url`, `-f text\|html\|linkedin\|json`). Or `./scripts/run_scheduled.sh` for ingest + report. |
+| **Optional ingest** | Before or alongside: `--data` CSV path, `--data-url` CSV URL, or `python scripts/fetch_comtrade.py` for UN Comtrade. |
+| **Config** | `.env` loaded; DB path, API keys, Ollama/Gemini/OpenAI model names, optional Comtrade key. |
+| **DB** | `data/trade.db` created/seeded; optional CSV or URL or Comtrade data loaded into `trade_flows`. |
+| **LLM choice** | Ollama (if local) → else Gemini (if key) → else OpenAI (if key). |
+| **Context** | Tools read from DB: regions, sectors, RAG chunks, trade flows, YoY growth, top flows, trends (and optional user focus). |
+| **Ollama/Gemini** | Context pasted into one prompt → one LLM call → parse REPORT_START/END. |
+| **OpenAI** | Multi-turn chat; model calls tools; when model outputs REPORT_START/END, parse and return. |
+| **Output** | Report string → file by format (text, html, linkedin [+ one-liner file], json) and console. |
 
-That’s the full run process and logic flow from your command to the final report file.
+That’s the full run process and logic flow from your command to the final report file(s).

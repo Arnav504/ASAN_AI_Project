@@ -1,0 +1,1 @@
+Error: Set USE_LOCAL_LLM=1 and run Ollama, or set OPENAI_API_KEY or GEMINI_API_KEY in .env.

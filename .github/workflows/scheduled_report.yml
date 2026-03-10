@@ -1,0 +1,48 @@
+# Daily or weekly trade sentiment report: ingest Comtrade (optional) + run ASAN Macro.
+# Add OPENAI_API_KEY or GEMINI_API_KEY as repo secrets for LLM; optional COMTRADE_API_KEY for live data.
+name: Scheduled trade report
+
+on:
+  schedule:
+    # Run every Monday at 00:00 UTC (adjust cron as needed)
+    - cron: "0 0 * * 1"
+  workflow_dispatch: # Allow manual run from Actions tab
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: (Optional) Fetch UN Comtrade data
+        env:
+          COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
+        run: |
+          if [ -n "$COMTRADE_API_KEY" ]; then
+            python scripts/fetch_comtrade.py --years 2022 2023 2024 --max-records 2000 || true
+          fi
+
+      - name: Run ASAN Macro report
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python main.py -q "global trade shifts" -o report_scheduled.txt
+          python main.py -q "global trade shifts" -o report_scheduled -f json
+
+      - name: Upload report artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-report
+          path: |
+            report_scheduled.txt
+            report_scheduled.json
+          if-no-files-found: ignore

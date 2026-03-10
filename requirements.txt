@@ -3,6 +3,7 @@
 
 # LLM
 openai>=1.0.0
+google-generativeai>=0.3.0
 
 # Database & data
 # (sqlite3 is in stdlib)
@@ -10,5 +11,9 @@ openai>=1.0.0
 # Env and CLI
 python-dotenv>=1.0.0
 
-# Optional: Google Gemini (free tier - use when OpenAI quota exceeded)
-google-generativeai>=0.8.0
+# Optional: dynamic data ingestion (CSV from URL, JSON API)
+requests>=2.28.0
+
+# Optional: UN Comtrade API (for scripts/fetch_comtrade.py live data)
+comtradeapicall>=1.2.0
+pandas>=1.0.0

@@ -1,0 +1,23 @@
+year,reporter_region,partner_region,sector,flow_type,value_usd
+2022,Brazil,China,Minerals,export,4200000000
+2023,Brazil,China,Minerals,export,3800000000
+2024,Brazil,India,Minerals,export,1100000000
+2022,India,Russia,Energy,import,2500000000
+2023,India,Russia,Energy,import,8100000000
+2024,India,Russia,Energy,import,9200000000
+2022,South Africa,China,Minerals,export,3000000000
+2023,South Africa,India,Minerals,export,800000000
+2022,China,USA,Electronics,export,120000000000
+2023,China,USA,Electronics,export,98000000000
+2024,China,USA,Electronics,export,85000000000
+2022,Viet Nam,USA,Textiles,export,12000000000
+2023,Viet Nam,USA,Textiles,export,15000000000
+2024,Viet Nam,USA,Textiles,export,18000000000
+2022,Mexico,USA,Manufacturing,export,220000000000
+2023,Mexico,USA,Manufacturing,export,250000000000
+2024,Mexico,USA,Manufacturing,export,280000000000
+2023,Indonesia,China,Textiles,export,3200000000
+2023,Egypt,UAE,Manufacturing,export,1800000000
+2024,Russia,India,Energy,export,5200000000
+2023,Brazil,Russia,Minerals,import,900000000
+2024,South Africa,Brazil,Minerals,export,650000000

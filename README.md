@@ -49,12 +49,26 @@ Examples:
 ```bash
 python main.py -q "BRICS" -o report.txt
 python main.py -q "US-China electronics" -d sample_trade.csv -o report.txt
+python main.py -q "BRICS" -o report.html -f html
+python main.py -o report.txt -f linkedin
+python main.py -o report.json -f json
 ```
+
+Use `-f json` for structured output (summary, bullets, so_what, whats_next) for dashboards or APIs.
 
 ### If you get 429 (quota exceeded)
 
 - **OpenAI:** Add billing/credits at [platform.openai.com](https://platform.openai.com), or switch to Gemini or Ollama.
 - **Gemini:** Wait and retry, or use a different key; or set `USE_LOCAL_LLM=1` and use Ollama instead.
+
+### Presenting on LinkedIn
+
+For elevator pitch, bullet points, post template, and demo tips, see **[LINKEDIN_PROJECT.md](LINKEDIN_PROJECT.md)**. Use `-f linkedin` to generate a one-liner summary file alongside the report.
+
+### Live data and scheduling
+
+- **UN Comtrade:** To ingest live trade data, see **[DOC_COMTRADE.md](DOC_COMTRADE.md)**. Run `python scripts/fetch_comtrade.py` then `main.py` as usual.
+- **Scheduling:** For daily or weekly reports (cron or GitHub Actions), see **[SCHEDULING.md](SCHEDULING.md)** and `scripts/run_scheduled.sh`.
 
 ---
 
@@ -73,19 +87,28 @@ For a **step-by-step explanation** of how the app runs (main → DB → agent �
 ## Project structure
 
 ```
-├── README.md           # This file + deliverable checklist
-├── RUN_AND_LOGIC.md    # How to run + full logic flow
-├── requirements.txt   # openai, python-dotenv, google-generativeai
-├── .env.example       # Template for API keys and Ollama
-├── config.py          # Paths, API keys, Ollama (use_local_ollama, get_ollama_*)
-├── database.py        # SQLite schema + seed (trade_flows, rag_chunks)
-├── tools.py           # User-created tools (list_regions, query_trade_flows, rag_retrieve, etc.)
-├── agent.py           # run_agent, Ollama/Gemini/OpenAI paths, tool use
-├── main.py            # CLI: raw input → report output
-├── run.sh             # Convenience: runs main.py (uses .venv if present)
-├── sample_trade.csv   # Example CSV for --data
+├── README.md              # This file
+├── colab_setup.ipynb      # Google Colab notebook – clone, install, run report
+├── RUN_AND_LOGIC.md      # How to run + full logic flow
+├── DOC_COMTRADE.md       # Ingesting live UN Comtrade data
+├── SCHEDULING.md         # Cron and GitHub Actions for daily/weekly reports
+├── requirements.txt      # openai, python-dotenv, google-generativeai, requests
+├── .env.example          # API keys (OpenAI, Gemini, Comtrade), Ollama
+├── config.py             # Paths, API keys, Ollama, model names
+├── database.py           # SQLite schema + seed (trade_flows, rag_chunks)
+├── tools.py              # Tools: list_regions, query_trade_flows, get_yoy_growth, get_top_flows, etc.
+├── data_ingestion.py     # CSV path/URL, optional JSON API
+├── agent.py              # run_agent, Ollama/Gemini/OpenAI, tool use
+├── main.py               # CLI: --format text | html | linkedin | json
+├── run.sh                # Convenience: runs main.py (uses .venv if present)
+├── sample_trade.csv      # Example CSV for --data
+├── scripts/
+│   ├── fetch_comtrade.py # Fetch UN Comtrade into DB (see DOC_COMTRADE.md)
+│   └── run_scheduled.sh  # Ingestion + report for cron
+├── .github/workflows/
+│   └── scheduled_report.yml  # Weekly/daily report (optional)
 └── data/
-    └── trade.db       # Created on first run (trade_flows + rag_chunks)
+    └── trade.db          # Created on first run (trade_flows + rag_chunks)
 ```
 
 ---
@@ -121,17 +144,22 @@ For a **step-by-step explanation** of how the app runs (main → DB → agent �
 
 ## Running in Google Colab
 
-In Colab you typically use an API (Gemini or OpenAI) rather than local Ollama:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Arnav504/ASAN_AI_Project/blob/main/colab_setup.ipynb)
 
-1. Upload this project (or clone from GitHub) into Colab.
-2. In a cell: `!pip install -r requirements.txt`
-3. Set an API key (e.g. Colab secrets or a cell):
+Use the **Colab notebook** `colab_setup.ipynb` for a one-click setup:
+
+1. Open the notebook in Colab via the badge above (or upload `colab_setup.ipynb` to Colab).
+2. Run the first cell to clone the repo.
+3. Run the install cell: `!pip install -r requirements.txt`
+4. Set an API key in a cell (Gemini or OpenAI; Colab cannot run Ollama):
    ```python
    import os
    os.environ["GEMINI_API_KEY"] = "..."   # or OPENAI_API_KEY
    ```
-4. Run: `!python main.py -q "BRICS" -o report.txt`  
-   Then read and display `report.txt`.
+5. Run: `!python main.py -q "BRICS" -o report.txt`
+6. Display `report.txt` in the next cell.
+
+**Optional:** In Colab, go to *Secrets* (key icon) and add `GEMINI_API_KEY`; then in the notebook use `userdata.get("GEMINI_API_KEY")` so you don’t paste the key in the notebook.
 
 ---
 

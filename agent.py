@@ -4,7 +4,7 @@ trade sentiment/synthesis reports. Satisfies: LLM use, augmentation (tools + DB/
 non-triviality (thematic synthesis, filtering, extrapolation, so-what/what-next).
 """
 import json
-from config import get_openai_api_key, get_gemini_api_key, use_local_ollama, get_ollama_base_url, get_ollama_model
+from config import get_openai_api_key, get_gemini_api_key, use_local_ollama, get_ollama_base_url, get_ollama_model, get_openai_model, get_gemini_model
 from tools import TOOLS, TOOL_BY_NAME
 
 SYSTEM_PROMPT = """You are ASAN Macro, an analyst agent that studies global trade (physical goods) and shifting geopolitical trade landscape. You have access to tools that query a trade database and a RAG store of trade bulletins.
@@ -82,6 +82,53 @@ def _run_tool(name: str, args: list) -> str:
             return fn(args[0] if args else "")
         if name == "rag_retrieve":
             return fn(args[0] if args else "trade", limit=5)
+        if name == "get_yoy_growth":
+            kwargs = {}
+            if len(args) >= 1 and args[0]:
+                kwargs["region"] = args[0]
+            if len(args) >= 2 and args[1]:
+                kwargs["sector"] = args[1]
+            if len(args) >= 3 and args[2]:
+                try:
+                    kwargs["year_from"] = int(args[2])
+                except ValueError:
+                    pass
+            if len(args) >= 4 and args[3]:
+                try:
+                    kwargs["year_to"] = int(args[3])
+                except ValueError:
+                    pass
+            return fn(**kwargs)
+        if name == "get_top_flows":
+            kwargs = {"n": 10}
+            if len(args) >= 1 and args[0]:
+                try:
+                    kwargs["n"] = int(args[0])
+                except ValueError:
+                    pass
+            if len(args) >= 2 and args[1]:
+                try:
+                    kwargs["year_from"] = int(args[1])
+                except ValueError:
+                    pass
+            if len(args) >= 3 and args[2]:
+                try:
+                    kwargs["year_to"] = int(args[2])
+                except ValueError:
+                    pass
+            if len(args) >= 4 and args[3]:
+                kwargs["flow_type"] = args[3]
+            return fn(**kwargs)
+        if name == "get_trade_trends":
+            kwargs = {}
+            if len(args) >= 1 and args[0]:
+                kwargs["region"] = args[0]
+            if len(args) >= 2 and args[1]:
+                try:
+                    kwargs["limit"] = int(args[1])
+                except ValueError:
+                    pass
+            return fn(**kwargs)
         return fn()
     except Exception as e:
         return f"Tool error: {e}"
@@ -108,6 +155,9 @@ def run_agent(user_query: str = None, max_rounds: int = 8) -> str:
         {"type": "function", "function": {"name": "get_region_summary", "description": "Get trade summary for one region.", "parameters": {"type": "object", "properties": {"region": {"type": "string"}}}}},
         {"type": "function", "function": {"name": "get_sector_summary", "description": "Get trade summary for one sector.", "parameters": {"type": "object", "properties": {"sector": {"type": "string"}}}}},
         {"type": "function", "function": {"name": "rag_retrieve", "description": "Retrieve context from trade bulletins. Argument: short query string.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}}},
+        {"type": "function", "function": {"name": "get_yoy_growth", "description": "Get year-over-year growth in trade value. Optional filters: region, sector, year_from, year_to.", "parameters": {"type": "object", "properties": {"region": {"type": "string"}, "sector": {"type": "string"}, "year_from": {"type": "integer"}, "year_to": {"type": "integer"}}}}},
+        {"type": "function", "function": {"name": "get_top_flows", "description": "Get top N trade flows by value. Optional: n, year_from, year_to, flow_type.", "parameters": {"type": "object", "properties": {"n": {"type": "integer"}, "year_from": {"type": "integer"}, "year_to": {"type": "integer"}, "flow_type": {"type": "string"}}}}},
+        {"type": "function", "function": {"name": "get_trade_trends", "description": "Summarize trade trends (sectors/partners that grew or shrank). Optional: region, limit.", "parameters": {"type": "object", "properties": {"region": {"type": "string"}, "limit": {"type": "integer"}}}}},
     ]
 
     prompt = (
@@ -122,7 +172,7 @@ def run_agent(user_query: str = None, max_rounds: int = 8) -> str:
 
     for _ in range(max_rounds):
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=get_openai_model(),
             messages=messages,
             tools=openai_tools,
             tool_choice="auto",
@@ -182,6 +232,9 @@ def _run_agent_ollama(user_query: str = None, max_rounds: int = 8) -> str:
         T.rag_retrieve("BRICS decoupling trade"),
         T.rag_retrieve("US China electronics"),
         T.query_trade_flows(year_from=2022, limit=30),
+        T.get_yoy_growth(year_from=2022, year_to=2024),
+        T.get_top_flows(n=10, year_from=2022),
+        T.get_trade_trends(limit=10),
     ]
     if user_query:
         context_parts.append(T.rag_retrieve(user_query))
@@ -228,7 +281,7 @@ def _run_agent_gemini(user_query: str = None, max_rounds: int = 8) -> str:
     except ImportError:
         return "Error: Install with: pip install google-generativeai"
     genai.configure(api_key=key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel(get_gemini_model())
     # Gather context by calling tools once
     context_parts = [
         T.list_regions(),
@@ -236,6 +289,9 @@ def _run_agent_gemini(user_query: str = None, max_rounds: int = 8) -> str:
         T.rag_retrieve("BRICS decoupling trade"),
         T.rag_retrieve("US China electronics"),
         T.query_trade_flows(year_from=2022, limit=30),
+        T.get_yoy_growth(year_from=2022, year_to=2024),
+        T.get_top_flows(n=10, year_from=2022),
+        T.get_trade_trends(limit=10),
     ]
     if user_query:
         context_parts.append(T.rag_retrieve(user_query))
@@ -306,6 +362,22 @@ def _run_tool_native(name: str, kwargs: dict) -> str:
             return fn(kwargs.get("sector") or "")
         if name == "rag_retrieve":
             return fn(kwargs.get("query") or "trade", limit=kwargs.get("limit", 5))
+        if name == "get_yoy_growth":
+            return fn(
+                region=kwargs.get("region"),
+                sector=kwargs.get("sector"),
+                year_from=kwargs.get("year_from"),
+                year_to=kwargs.get("year_to"),
+            )
+        if name == "get_top_flows":
+            return fn(
+                n=kwargs.get("n", 10),
+                year_from=kwargs.get("year_from"),
+                year_to=kwargs.get("year_to"),
+                flow_type=kwargs.get("flow_type"),
+            )
+        if name == "get_trade_trends":
+            return fn(region=kwargs.get("region"), limit=kwargs.get("limit", 10))
         return fn()
     except Exception as e:
         return f"Tool error: {e}"

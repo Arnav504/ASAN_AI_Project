@@ -100,6 +100,14 @@ def ensure_db():
     conn.close()
 
 
+def clear_trade_flows():
+    """Remove all rows from trade_flows (e.g. before loading dynamic data only)."""
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("DELETE FROM trade_flows")
+    conn.commit()
+    conn.close()
+
+
 if __name__ == "__main__":
     ensure_db()
     print("Database ready at", DB_PATH)

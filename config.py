@@ -52,3 +52,27 @@ def get_ollama_base_url():
 
 def get_ollama_model():
     return os.environ.get("OLLAMA_MODEL", "llama3.2").strip() or "llama3.2"
+
+
+def get_openai_model():
+    """Model for OpenAI API (e.g. gpt-4o-mini, gpt-4o). Set OPENAI_MODEL in .env for better quality."""
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(str(env_path), override=True)
+        except Exception:
+            pass
+    return os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+
+def get_gemini_model():
+    """Model for Gemini API (e.g. gemini-2.0-flash, gemini-1.5-pro). Set GEMINI_MODEL in .env."""
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(str(env_path), override=True)
+        except Exception:
+            pass
+    return os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
