@@ -11,6 +11,62 @@ I designed and implemented ASAN Macro end-to-end: data layer, analyst tools, mul
 
 ---
 
+## Functionality
+
+ASAN Macro is a **command-line AI agent** that analyzes regional and sectoral trade data and produces a structured **trade sentiment report**. It does not require a web UI: one command loads data (if needed), queries a local database through tools, calls an LLM, and writes the report to disk.
+
+### What it does
+
+| Capability | Behavior |
+|------------|----------|
+| **Trade sentiment reporting** | Generates a short narrative with thematic synthesis, key regions/sectors, implications (**so what**), and outlook (**what’s next**), wrapped in `REPORT_START` / `REPORT_END`. |
+| **Focus queries** | Optional `-q` (e.g. `BRICS`, `US-China electronics`) steers analysis; omit it for a full-database read. |
+| **Tool-grounded analysis** | The LLM is backed by nine tools over SQLite—not free-form guessing alone—so claims can be tied to stored flows and bulletins. |
+| **Multi-backend LLMs** | Uses the first available backend: **Ollama (local)** → **Gemini** → **OpenAI**. OpenAI runs a multi-turn function-calling loop; Ollama/Gemini pre-gather tool context, then synthesize in one call. |
+| **Dynamic data ingest** | Load local CSV (`-d`), CSV from URL (`--data-url`), or UN Comtrade via `scripts/fetch_comtrade.py`. `--replace-data` clears seed rows before loading. |
+| **Multiple output formats** | `text` (default), `html`, `linkedin` (report + short one-liner file), or `json` (structured fields for dashboards/APIs). |
+| **Evaluation** | `evaluation/run_evaluation.py` runs multiple focus queries and scores section presence, length, and runtime. |
+| **Adversarial / safety probes** | `evaluation/adversarial_test.py` exercises prompt-leak, jailbreak-style, off-topic, and gibberish inputs. |
+| **Scheduled runs** | Cron helper (`scripts/run_scheduled.sh`) and GitHub Actions can ingest + generate recurring report artifacts. |
+| **Colab demo path** | `colab_setup.ipynb` supports cloud runs with Gemini or OpenAI (no local Ollama). |
+
+### Inputs and outputs
+
+| | Details |
+|--|---------|
+| **Inputs** | Seeded SQLite DB (`data/trade.db`: `trade_flows`, `rag_chunks`); optional CSV/URL/Comtrade; optional focus query; `.env` LLM config. |
+| **CSV columns** | `year`, `reporter_region`, `partner_region`, `sector`, `flow_type`, `value_usd`. |
+| **Outputs** | Report file (+ console print). HTML is escaped for safer viewing; JSON exposes summary, bullets, so_what, whats_next. |
+
+### Analyst tools (what the agent can query)
+
+| Tool | Function |
+|------|----------|
+| `list_regions` / `list_sectors` | Discover entities in the database |
+| `query_trade_flows` | Filter flows by reporter, partner, sector, year range |
+| `get_region_summary` / `get_sector_summary` | Aggregate values for a region or sector |
+| `get_yoy_growth` | Year-over-year growth via SQL window logic |
+| `get_top_flows` | Top-N flows by value |
+| `get_trade_trends` | First-year vs last-year deltas |
+| `rag_retrieve` | Keyword retrieval over stored trade bulletin chunks |
+
+### Typical use
+
+```bash
+# Full analysis on seeded (or previously ingested) data
+python main.py -o report.txt
+
+# Focused brief + LinkedIn one-liner
+python main.py -q "BRICS" -o report.txt -f linkedin
+
+# Ingest CSV, then analyze
+python main.py -q "US-China electronics" -d sample_trade.csv -o report.html -f html
+```
+
+Intended users: economists, macro strategists, and policy/business readers who need a consistent, data-tied brief instead of a manual spreadsheet-to-chatbot workflow.
+
+---
+
 ## Logical flow
 
 End-to-end pipeline from user input to report:
