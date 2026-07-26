@@ -1,177 +1,245 @@
-# ASAN Macro – Maritime & Trade Analysis Agent
+# ASAN Macro
 
-**Team:** Anders, Sam, Arnav, Nico  
+**AI-powered trade analysis agent** · Tool-augmented LLM · Evaluation & safety scaffolding
 
-ASAN Macro analyzes real-time and lagged maritime/trade data to study the shifting geopolitical trade landscape—e.g., whether middle economies are decoupling from US/China and forming their own trade partnerships (e.g. BRICS). The agent uses an LLM plus a **database** and **user-created tools** to produce thematic synthesis, contextual filtering, and sentiment reports with “so what” and “what’s next.”
+**Built solo by Arnav Sahai** · AI Analyst & AI Security Analyst
+
+I designed and implemented ASAN Macro end-to-end: data layer, analyst tools, multi-backend LLM agent, evaluation harness, adversarial safety checks, Comtrade ingest, and scheduled reporting. The system turns structured trade data into short, decision-ready **sentiment reports** with thematic synthesis, key regions/sectors, **so what**, and **what’s next**—grounding the LLM in SQLite, custom tools, and lightweight RAG rather than a generic chatbot paste.
+
+> **Problem it solves:** Manual Comtrade → spreadsheet → generic LLM workflows are slow, inconsistent, and poorly grounded.  
+> **Approach I built:** Ingest → query via tools → synthesize with a multi-backend agent → evaluate completeness and misuse resistance.
+
+---
+
+## Logical flow
+
+End-to-end pipeline from user input to report:
+
+```mermaid
+flowchart TB
+    subgraph Inputs
+        U[User / Cron / GitHub Actions]
+        Q["Focus query (-q)"]
+        D["CSV / URL / UN Comtrade"]
+    end
+
+    subgraph Orchestration["main.py"]
+        E[Load .env + config]
+        DB[ensure_db → data/trade.db]
+        IN[Optional ingest into trade_flows]
+        A[run_agent]
+        OUT[Format: text / HTML / LinkedIn / JSON]
+    end
+
+    subgraph Agent["agent.py"]
+        SEL{LLM backend}
+        OL[Ollama — pre-gather tools → single prompt]
+        GE[Gemini — pre-gather tools → single prompt]
+        OA[OpenAI — multi-turn function calling]
+    end
+
+    subgraph Tools["tools.py + SQLite"]
+        T1[list_regions / list_sectors]
+        T2[query_trade_flows]
+        T3[get_yoy_growth / get_top_flows / get_trade_trends]
+        T4[rag_retrieve over rag_chunks]
+    end
+
+    U --> E --> DB --> IN --> A
+    Q --> A
+    D --> IN
+    A --> SEL
+    SEL --> OL & GE & OA
+    OL & GE & OA --> Tools
+    Tools --> DB
+    OL & GE & OA --> OUT
+```
+
+### Step-by-step
+
+| Step | Component | What happens |
+|------|-----------|--------------|
+| **1. Configure** | `config.py`, `.env` | Load API keys / Ollama settings. Backend priority: **Ollama → Gemini → OpenAI**. |
+| **2. Persist** | `database.py` | Create/seed `data/trade.db` (`trade_flows`, `rag_chunks`) if missing. |
+| **3. Ingest (optional)** | `data_ingestion.py`, `scripts/fetch_comtrade.py` | Load CSV, CSV URL, or UN Comtrade into the DB before analysis. |
+| **4. Ground** | `tools.py` | Nine tools query structured flows and keyword RAG so the model reasons over **data**, not only priors. |
+| **5. Reason** | `agent.py` | LLM synthesizes themes (e.g. BRICS, US–China, South–South). OpenAI uses a true tool-calling loop; Ollama/Gemini use deterministic pre-tooling + one synthesis call for portability. |
+| **6. Deliver** | `main.py` | Extract `REPORT_START`…`REPORT_END` and write text / HTML / LinkedIn one-liner / structured JSON. |
+| **7. Assure** | `evaluation/` | Completeness metrics across focus queries; adversarial cases for prompt leak, jailbreak-style, off-topic, and gibberish inputs. |
+| **8. Operate** | GitHub Actions / cron | Optional scheduled ingest + report artifacts for recurring briefs. |
+
+For diagrams and deeper run notes, see [LOGIC_FLOW_DIAGRAM.md](LOGIC_FLOW_DIAGRAM.md) and [RUN_AND_LOGIC.md](RUN_AND_LOGIC.md).
+
+---
+
+## Why I designed it this way
+
+| Design choice | My rationale |
+|---------------|--------------|
+| **Tools over raw prompt stuffing** | Map analyst questions to named tools (YoY, top flows, trends)—clearer, testable, closer to production agents. |
+| **Multi-backend orchestration** | Local Ollama for zero-quota demos; Gemini/OpenAI when quality or function calling matters. |
+| **Structured report contract** | Fixed sections make outputs usable for briefs and measurable in evaluation. |
+| **Evaluation + adversarial suite** | Treat agent quality and misuse resistance as engineering problems, not afterthoughts. |
+| **CLI + artifacts first** | Keep the surface small while proving the full data → insight loop. |
 
 ---
 
 ## Quick start
 
-1. **Clone or download** this repo.
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Or use the project venv: `./run.sh` (uses `.venv` if present).
-3. **Choose one LLM backend** (see below). **Recommended:** local Ollama (no API key, no quota).
-4. **Run the application:**
-   ```bash
-   python main.py
-   python main.py -q "BRICS" -o report.txt
-   ./run.sh -q "BRICS" -o report.txt
-   ```
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # configure one LLM backend
+python main.py -q "BRICS" -o report.txt
+# or: ./run.sh -q "BRICS" -o report.txt
+```
 
-**Input:** Raw data = seeded trade database (`data/trade.db`), optionally a CSV via `--data`, and an optional focus via `--query`.  
-**Output:** A trade sentiment report is written to a file and printed (no extra manual steps).
+### LLM backends (pick one)
 
-### LLM options (pick one)
+| Backend | Setup | Best for |
+|---------|--------|----------|
+| **Ollama (recommended)** | `ollama pull qwen2:7b` · `.env`: `USE_LOCAL_LLM=1`, `OLLAMA_MODEL=qwen2:7b` | Local demos, no API quota |
+| **Gemini** | `GEMINI_API_KEY=...` | Free-tier cloud runs |
+| **OpenAI** | `OPENAI_API_KEY=...` | Full multi-turn tool calling |
 
-The app checks in this order: **Ollama (local)** → **Gemini** → **OpenAI**. Configure one in `.env`.
+### Common commands
 
-| Option | Setup | Use case |
-|--------|--------|----------|
-| **Local Ollama** (recommended) | Install [Ollama](https://ollama.com), run `ollama pull qwen2:7b` (or `llama3.2`, `mistral`). In `.env`: `USE_LOCAL_LLM=1` and `OLLAMA_MODEL=qwen2:7b`. | No API key or quota; runs fully on your machine. |
-| **Gemini** | Get free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). In `.env`: `GEMINI_API_KEY=your_key`. | Free tier when OpenAI quota is exceeded. |
-| **OpenAI** | In `.env`: `OPENAI_API_KEY=sk-...`. | Full tool-calling loop; requires API credits. |
-
-Optional for Ollama: `OLLAMA_BASE_URL=http://localhost:11434/v1` (default).
-
-### Command-line options
-
-| Flag | Description |
-|------|-------------|
-| `-q "BRICS"` / `--query` | Focus the analysis (e.g. BRICS, US-China electronics). |
-| `-o report.txt` / `--output` | Write report to this file (default: timestamped `report_YYYYMMDD_HHMMSS.txt`). |
-| `-d sample_trade.csv` / `--data` | Load CSV into the DB before analysis (columns: year, reporter_region, partner_region, sector, flow_type, value_usd). |
-
-Examples:
 ```bash
 python main.py -q "BRICS" -o report.txt
 python main.py -q "US-China electronics" -d sample_trade.csv -o report.txt
 python main.py -q "BRICS" -o report.html -f html
-python main.py -o report.txt -f linkedin
 python main.py -o report.json -f json
+python scripts/fetch_comtrade.py && python main.py -q "BRICS" -o report.txt
+python evaluation/run_evaluation.py
+python evaluation/adversarial_test.py
 ```
 
-Use `-f json` for structured output (summary, bullets, so_what, whats_next) for dashboards or APIs.
-
-### If you get 429 (quota exceeded)
-
-- **OpenAI:** Add billing/credits at [platform.openai.com](https://platform.openai.com), or switch to Gemini or Ollama.
-- **Gemini:** Wait and retry, or use a different key; or set `USE_LOCAL_LLM=1` and use Ollama instead.
-
-### Presenting on LinkedIn
-
-For elevator pitch, bullet points, post template, and demo tips, see **[LINKEDIN_PROJECT.md](LINKEDIN_PROJECT.md)**. Use `-f linkedin` to generate a one-liner summary file alongside the report.
-
-### Live data and scheduling
-
-- **UN Comtrade:** To ingest live trade data, see **[DOC_COMTRADE.md](DOC_COMTRADE.md)**. Run `python scripts/fetch_comtrade.py` then `main.py` as usual.
-- **Scheduling:** For daily or weekly reports (cron or GitHub Actions), see **[SCHEDULING.md](SCHEDULING.md)** and `scripts/run_scheduled.sh`.
+| Flag | Description |
+|------|-------------|
+| `-q` / `--query` | Focus the analysis (e.g. BRICS, US-China electronics) |
+| `-o` / `--output` | Output path (default: timestamped report file) |
+| `-d` / `--data` | Load CSV into DB before analysis |
+| `--data-url` | Load CSV from a URL |
+| `-f` | `text` \| `html` \| `linkedin` \| `json` |
 
 ---
 
-## Logic flow and run details
-
-For a **step-by-step explanation** of how the app runs (main → DB → agent → LLM choice → tools → report), see **[RUN_AND_LOGIC.md](RUN_AND_LOGIC.md)**. It covers:
-
-- How `main.py` loads `.env`, ensures the DB, and optionally loads CSV.
-- How the agent chooses Ollama vs Gemini vs OpenAI.
-- How context is gathered (tools + DB) for each backend.
-- Single-prompt path (Ollama, Gemini) vs tool-calling loop (OpenAI).
-- End-to-end flow diagram and summary table.
-
----
-
-## Project structure
+## Architecture
 
 ```
-├── README.md              # This file
-├── colab_setup.ipynb      # Google Colab notebook – clone, install, run report
-├── RUN_AND_LOGIC.md      # How to run + full logic flow
-├── DOC_COMTRADE.md       # Ingesting live UN Comtrade data
-├── SCHEDULING.md         # Cron and GitHub Actions for daily/weekly reports
-├── requirements.txt      # openai, python-dotenv, google-generativeai, requests
-├── .env.example          # API keys (OpenAI, Gemini, Comtrade), Ollama
-├── config.py             # Paths, API keys, Ollama, model names
-├── database.py           # SQLite schema + seed (trade_flows, rag_chunks)
-├── tools.py              # Tools: list_regions, query_trade_flows, get_yoy_growth, get_top_flows, etc.
-├── data_ingestion.py     # CSV path/URL, optional JSON API
-├── agent.py              # run_agent, Ollama/Gemini/OpenAI, tool use
-├── main.py               # CLI: --format text | html | linkedin | json
-├── run.sh                # Convenience: runs main.py (uses .venv if present)
-├── sample_trade.csv      # Example CSV for --data
+ASAN_AI_Project/
+├── main.py                 # CLI entry: ingest → agent → format output
+├── agent.py                # LLM orchestration (Ollama / Gemini / OpenAI)
+├── tools.py                # Nine analyst tools over SQLite + RAG
+├── database.py             # Schema + seed data
+├── data_ingestion.py       # CSV / URL / JSON ingest
+├── config.py               # Env, paths, model helpers
+├── evaluation/
+│   ├── run_evaluation.py   # Completeness / runtime harness
+│   └── adversarial_test.py # Misuse / injection-style probes
 ├── scripts/
-│   ├── fetch_comtrade.py # Fetch UN Comtrade into DB (see DOC_COMTRADE.md)
-│   └── run_scheduled.sh  # Ingestion + report for cron
+│   ├── fetch_comtrade.py   # UN Comtrade → DB
+│   └── run_scheduled.sh    # Ingest + report for cron
 ├── .github/workflows/
-│   └── scheduled_report.yml  # Weekly/daily report (optional)
-└── data/
-    └── trade.db          # Created on first run (trade_flows + rag_chunks)
+│   └── scheduled_report.yml
+└── data/                   # trade.db created on first run
 ```
 
----
-
-## How this meets the deliverable (Application Code 60%)
-
-| Criterion | How it’s satisfied |
-|-----------|--------------------|
-| **LLM use (10%)** | The app uses a large language model via **OpenAI API**, **Gemini API**, or a **local open-source model (Ollama)**. The LLM drives synthesis and report generation. |
-| **Non-triviality (20%)** | The task is not “one ChatGPT prompt”: the app combines **structured trade data** (DB), **RAG-style retrieval** (rag_chunks), and **tool use**. The LLM filters, synthesizes, and extrapolates to produce a “so what” / “what’s next” report that would require manual data pulling and analysis with a plain chatbot. |
-| **Augmentation (20%)** | **1) Database for RAG/agentic memory:** SQLite `trade_flows` + `rag_chunks`; the agent queries these via tools. **2) User-created tools:** `tools.py` implements `list_regions`, `list_sectors`, `query_trade_flows`, `get_region_summary`, `get_sector_summary`, `rag_retrieve`—used by the agent (and by the OpenAI model via function calling when using OpenAI). |
-| **Input/output completeness (50%)** | **Input:** Raw data = the database (seeded + optional `--data` CSV) and optional `--query`. **Output:** The app writes the report to a file and prints it; no manual intervention after running `main.py`. |
+**Agent tools:** `list_regions`, `list_sectors`, `query_trade_flows`, `get_region_summary`, `get_sector_summary`, `rag_retrieve`, `get_yoy_growth`, `get_top_flows`, `get_trade_trends`.
 
 ---
 
-## Demo (40%) – Suggested slides and talking points
+## Evaluation & safety
 
-- **Use case (10%)**  
-  Purpose: give economists, macro strategists, multilateral bodies, and businesses a single run that turns trade/maritime-style data into a short sentiment report (themes, regions/sectors, so what, what’s next). Value: saves manual data gathering and synthesis.
+| Practice | Location | Intent |
+|----------|----------|--------|
+| Completeness metrics (sections, length, runtime) | `evaluation/run_evaluation.py` | Measure report fitness across focus queries |
+| Adversarial probes (prompt leak, jailbreak-style, off-topic, gibberish) | `evaluation/adversarial_test.py` | Surface misuse and grounding failures early |
+| Secrets hygiene | `.env` / GitHub Actions secrets | No hardcoded API keys |
+| Parameterized SQL | `tools.py` | Reduce injection risk in DB tools |
+| HTML escaping | `main.py` | Safer rendered report artifacts |
 
-- **Non-triviality (10%)**  
-  Alternatives: manually querying UN Comtrade, Census, Eurostat, etc., then pasting into ChatGPT. Our app: structured DB + tools + RAG so the LLM reasons over real data and produces a consistent report format.
-
-- **Architecture (30%)**  
-  Use the diagram in [RUN_AND_LOGIC.md](RUN_AND_LOGIC.md#5-end-to-end-flow-diagram). Short version: **User / CSV** → **main.py** → **DB + tools** → **agent** (Ollama or Gemini or OpenAI) → **Report file**. Call out: SQLite (trade_flows, rag_chunks), tools in `tools.py`, and the three LLM backends (local Ollama, Gemini, OpenAI).
-
-- **Live demo (50%)**  
-  1. Show `data/trade.db` or run `python database.py`.  
-  2. Run `python main.py -q "BRICS" -o report.txt` (with Ollama running, or an API key set).  
-  3. Show the generated report and the “so what” / “what’s next” sections.
+Details: [EVALUATION_AND_SAFETY.md](EVALUATION_AND_SAFETY.md).
 
 ---
 
-## Running in Google Colab
+## Live data & scheduling
+
+- **UN Comtrade:** [DOC_COMTRADE.md](DOC_COMTRADE.md) · `python scripts/fetch_comtrade.py`
+- **Cron / Actions:** [SCHEDULING.md](SCHEDULING.md) · `scripts/run_scheduled.sh` · weekly workflow in `.github/workflows/`
+
+---
+
+## Google Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Arnav504/ASAN_AI_Project/blob/main/colab_setup.ipynb)
 
-Use the **Colab notebook** `colab_setup.ipynb` for a one-click setup:
+1. Open the notebook → clone → `pip install -r requirements.txt`
+2. Set `GEMINI_API_KEY` or `OPENAI_API_KEY` (Colab cannot run Ollama)
+3. `!python main.py -q "BRICS" -o report.txt`
 
-1. Open the notebook in Colab via the badge above (or upload `colab_setup.ipynb` to Colab).
-2. Run the first cell to clone the repo.
-3. Run the install cell: `!pip install -r requirements.txt`
-4. Set an API key in a cell (Gemini or OpenAI; Colab cannot run Ollama):
-   ```python
-   import os
-   os.environ["GEMINI_API_KEY"] = "..."   # or OPENAI_API_KEY
-   ```
-5. Run: `!python main.py -q "BRICS" -o report.txt`
-6. Display `report.txt` in the next cell.
-
-**Optional:** In Colab, go to *Secrets* (key icon) and add `GEMINI_API_KEY`; then in the notebook use `userdata.get("GEMINI_API_KEY")` so you don’t paste the key in the notebook.
+Prefer Colab **Secrets** over pasting keys into cells.
 
 ---
 
-## Data sources (from your planning doc)
+## Ownership
 
-The current seed data is synthetic but aligned with your planned sources (e.g. Comtrade, Census, Eurostat, MarineTraffic, VesselFinder). To extend the app:
+I completed this project alone: architecture, agent orchestration, tools/DB/RAG, ingestion and scheduling, evaluation and adversarial safety documentation, and portfolio-facing documentation. Interview talking points: [LINKEDIN_PROJECT.md](LINKEDIN_PROJECT.md).
 
-- Add more rows to `SAMPLE_TRADE` / `SAMPLE_RAG_CHUNKS` in `database.py`, or  
-- Load CSVs via `main.py --data yourfile.csv` (columns: year, reporter_region, partner_region, sector, flow_type, value_usd).
+---
+
+## Proposed improvements
+
+Roadmap I proposed to strengthen hiring and AI-expert appeal. Status: **proposed** (not yet implemented unless noted).
+
+### Priority 0 — highest impact
+
+| Change I proposed | Why I proposed it |
+|-------------------|-------------------|
+| Demo GIF / 60s screen recording in the README | Recruiters rarely clone; visual proof of the agent loop |
+| Fix evaluation metrics (e.g. average word count) and commit live adversarial results with a configured LLM | Safety claims need evidence from real model runs |
+| Unit tests (`pytest`) for `tools.py` (SQL filters, YoY, HTML escape) | Agent tools should be tested independently of the LLM |
+| CI on PR: lint + unit tests + dry-run evaluation | Engineering discipline beyond notebook demos |
+
+### Priority 1 — AI / agent credibility
+
+| Change I proposed | Why I proposed it |
+|-------------------|-------------------|
+| Replace keyword RAG with embeddings + cite sources in reports | Move beyond “toy RAG”; prove groundedness to AI reviewers |
+| Add groundedness / citation checks to the evaluation harness | Separate narrative fluency from factual fidelity |
+| Structured output via JSON schema / Pydantic (keep delimiters as fallback) | Typed contracts match modern agent stacks |
+| Prompt-injection guard on `-q` | Threat-model user input as an AI security analyst |
+| URL allowlist for `--data-url` | Mitigate SSRF if the CLI is ever exposed as a service |
+| Tool-call trace log (name, args, latency per run) | Agent observability for debugging and demos |
+
+### Priority 2 — polish & differentiation
+
+| Change I proposed | Why I proposed it |
+|-------------------|-------------------|
+| Optional thin FastAPI endpoint + auth token over the same agent core | Show a productization path without a rewrite |
+| Dockerfile (+ optional Compose) for reproducible local runs | Lower friction for technical reviewers |
+| Auto-append “machine-generated; verify against sources” disclaimer | Make responsible-AI practice concrete in every report |
+| Short architecture note on dual Ollama vs OpenAI execution modes | Document intentional trade-offs |
+| Sample report gallery (BRICS, US–China) with expected tool traces | Make quality tangible in-repo |
+| Clarify goods-trade focus vs maritime branding (or add AIS later) | Avoid domain credibility gaps with experts |
+
+### Current limitations (baseline I acknowledged)
+
+| Current state | Direction I proposed |
+|---------------|----------------------|
+| Keyword RAG (`LIKE` over chunks) | Embedding retrieval + ranking |
+| True tool loop on OpenAI; pre-tooling on Ollama/Gemini | Unified tool-calling where models support it |
+| CLI + report artifacts | Optional thin API with auth and rate limits |
+| Adversarial suite present | Always run against a live configured model in CI |
+| Synthetic seed + optional Comtrade | Larger curated corpora + groundedness scoring |
+
+---
+
+## Skills demonstrated
+
+LLM agents · function calling · RAG · prompt engineering · AI evaluation · adversarial / prompt-injection testing · secure secrets handling · SQL · data ingestion · Python · OpenAI / Gemini / Ollama · GitHub Actions
 
 ---
 
 ## License
 
-Use as needed for your course submission. Ensure the repo or Drive folder is **public or shared with the instructor** as required.
+Use as needed for academic and portfolio purposes. Keep API keys out of the repository.
